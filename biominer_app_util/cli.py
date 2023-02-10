@@ -353,7 +353,7 @@ def parse_samples(file):
     return dict_list
 
 
-def render_app(app_path, template_file, data):
+def render_app_file(app_path, template_file, data):
     env = Environment(loader=FileSystemLoader(app_path))
     template = env.get_template(template_file)
     return template.render(**data)
@@ -685,6 +685,44 @@ def install(choppy_app, base_dir, force, username, password, endpoint):
     install_app(app_root_dir, choppy_app, endpoint, username, password)
 
 
+def render_app(app_dir, output_dir, project_name, sample={}):
+    # 用户可通过samples文件覆写default文件中已定义的变量
+    # 只有samples文件中缺少的变量才从default文件中取值
+    app_default_var = AppDefaultVar(app_dir)
+    all_default_value = app_default_var.show_default_value()
+
+    for key in all_default_value.keys():
+        if key not in sample.keys():
+            sample[key] = all_default_value.get(key)
+
+    sample['project_name'] = project_name
+
+    # inputs
+    inputs = render_app_file(app_dir, 'inputs', sample)
+    check_json(string=inputs)  # Json Syntax Checker
+    write(output_dir, 'inputs', inputs)
+    inputs_path = os.path.join(output_dir, 'inputs')
+
+    # workflow.wdl
+    wdl = render_app_file(app_dir, 'workflow.wdl', sample)
+    write(output_dir, 'workflow.wdl', wdl)
+    wdl_path = os.path.join(output_dir, 'workflow.wdl')
+
+    # defaults
+    src_defaults_file = os.path.join(app_dir, 'defaults')
+    dest_defaults_file = os.path.join(output_dir, 'defaults')
+    copy_and_overwrite(src_defaults_file,
+                       dest_defaults_file, is_file=True)
+
+    src_dependencies = os.path.join(app_dir, 'tasks')
+    dest_dependencies = os.path.join(output_dir, 'tasks')
+    copy_and_overwrite(src_dependencies, dest_dependencies)
+
+    # dependencies zip file
+    zip_output = generate_dependencies_zip(src_dependencies)
+    shutil.copy2(zip_output, output_dir)
+
+
 @click.group()
 def uninstall_cli():
     pass
@@ -772,13 +810,13 @@ def render(app_name, samples, base_dir, work_dir, project_name, force):
             sample['project_name'] = project_name
 
             # inputs
-            inputs = render_app(app_dir, 'inputs', sample)
+            inputs = render_app_file(app_dir, 'inputs', sample)
             check_json(string=inputs)  # Json Syntax Checker
             write(sample_path, 'inputs', inputs)
             inputs_path = os.path.join(sample_path, 'inputs')
 
             # workflow.wdl
-            wdl = render_app(app_dir, 'workflow.wdl', sample)
+            wdl = render_app_file(app_dir, 'workflow.wdl', sample)
             write(sample_path, 'workflow.wdl', wdl)
             wdl_path = os.path.join(sample_path, 'workflow.wdl')
 
