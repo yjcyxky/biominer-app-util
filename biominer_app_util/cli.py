@@ -629,6 +629,34 @@ def copy_and_overwrite(from_path, to_path, is_file=False, ignore_errors=True, as
                        (from_path, to_path, str(err)))
 
 
+def test_app(project_name: str, data_dict: dict, wdl_dir="/venv/workflow",
+             cromwell_conf_file="/venv/cromwell-local.conf",
+             cromwell_jar_file="/venv/share/cromwell/cromwell.jar",
+             output_dir="/data"):
+    if not os.path.exists(wdl_dir):
+        print("Cannot find the workflow, please contact the administrator.")
+
+    output_workflow_dir = os.path.join(output_dir, project_name)
+    os.makedirs(output_workflow_dir, exist_ok=True)
+
+    render_app(wdl_dir, output_dir=output_workflow_dir,
+               project_name=project_name, sample=data_dict)
+
+    def call_cromwell(inputs_fpath, workflow_fpath, workflow_root, tasks_path):
+        # cmd = ['cromwell', 'run', workflow_fpath, "-i", inputs_fpath,
+        #        "-p", tasks_path, "--workflow-root", workflow_root]
+        cmd = ['java', '-Dconfig.file=%s' % cromwell_conf_file, '-jar', cromwell_jar_file,
+               'run', workflow_fpath, "-i", inputs_fpath, "-p", tasks_path, "--workflow-root", workflow_root]
+        print('Run workflow and output results to %s.' % workflow_root)
+        proc = Popen(cmd, stdin=PIPE)
+        proc.communicate()
+
+    inputs_fpath = os.path.join(output_workflow_dir, "inputs")
+    workflow_fpath = os.path.join(output_workflow_dir, "workflow.wdl")
+    tasks_path = os.path.join(output_workflow_dir, "tasks.zip")
+    call_cromwell(inputs_fpath, workflow_fpath, output_dir, tasks_path)
+
+
 @click.group()
 def version_cli():
     pass
@@ -835,8 +863,40 @@ def render(app_name, samples, base_dir, work_dir, project_name, force):
             shutil.copy2(zip_output, sample_path)
 
 
+@click.group()
+def test_cli():
+    pass
+
+
+@test_cli.command()
+@click.option('--project-name', '-p', required=True, help='What\'s your project name.')
+@click.option('--data-dict-file', '-d', required=True, help='Where is the file which contains data dictionary.', 
+              type=click.Path(exists=True, file_okay=True))
+@click.option('--wdl-dir', '-w', required=True, help='Where is the workflow.', type=click.Path(exists=True, dir_okay=True))
+@click.option('--crowell-conf-file', '-c', required=True, help='Where is the config file for cromwell instance.', 
+              type=click.Path(exists=True, file_okay=True))
+@click.option('--crowell-jar-file', '-j', required=True, help='Where is the jar file for cromwell instance.', 
+              type=click.Path(exists=True, file_okay=True))
+@click.option('--output-dir', '-o', help='Where is the output directory.', type=click.Path(exists=True, dir_okay=True))
+def test(project_name, data_dict_file, wdl_dir,
+         cromwell_conf_file, cromwell_jar_file, output_dir):
+    """
+    Test an app.
+    """
+    if not os.path.exists(data_dict_file):
+        raise Exception("Cannot find the data dictionary file (%s)." % data_dict_file)
+
+    if not re.match(r'[a-zA-Z0-9_]+', project_name):
+        raise Exception("Invalid project name, it only support lower, upper letters, numbers and underline.")
+    
+    with open(data_dict_file) as f:
+        data_dict = json.load(f)
+        test_app(project_name, data_dict, wdl_dir=wdl_dir, cromwell_conf_file=cromwell_conf_file,
+                 cromwell_jar_file=cromwell_jar_file, output_dir=output_dir)
+
+
 main = click.CommandCollection(
-    sources=[apps_cli, install_cli, uninstall_cli, render_cli, version_cli])
+    sources=[apps_cli, install_cli, uninstall_cli, render_cli, version_cli, test_cli])
 
 if __name__ == '__main__':
     main()
